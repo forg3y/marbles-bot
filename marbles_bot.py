@@ -321,44 +321,53 @@ async def leaderboard(interaction: discord.Interaction):
 @tree.command(name="help", description="Show all available commands.")
 async def help(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🔮 Marbles Bot — Commands",
+        title="🔮 Marbles Bot",
+        description=(
+            "Everyone starts with **10 marbles**. Challenge other players and bet ALL your marbles "
+            "on the outcome. The winner takes everything.\n\n"
+            "**Reporting results:** after a match, both players run `/winner` and must vote for the "
+            "same person. If votes don't match, you get a warning and vote again. Second mismatch "
+            "gets a final warning. Third mismatch and **both players lose all their marbles.**\n\n"
+            "**Running out:** you get +1 marble automatically every midnight EST. If you hit 0, "
+            "use `/bonusmarble` once per day, or `/beg` another player for one."
+        ),
         color=discord.Color.purple()
     )
-    embed.add_field(name="👤 Player", value="""
-`/join` — Join the marbles system (starts you at 10)
-`/marbles` — Check your marble count
-`/marbles @user` — Check someone else's count
-`/leaderboard` — See everyone ranked
-""", inline=False)
 
-    embed.add_field(name="⚔️ Challenges", value="""
-`/challenge @user` — Challenge someone (all marbles on the line)
-`/accept` — Accept a pending challenge
-`/decline` — Decline a pending challenge
-`/cancel` — Cancel your outgoing challenge
-`/forfeit` — Forfeit your active match (you lose)
-""", inline=False)
+    embed.add_field(name="👤 Player", value=(
+        "`/join` - Join the marbles system (starts you at 10)\n"
+        "`/marbles` - Check your marble count\n"
+        "`/marbles @user` - Check someone else's count\n"
+        "`/leaderboard` - See everyone ranked"
+    ), inline=False)
 
-    embed.add_field(name="🏆 Results", value="""
-`/winner @user` — Report who won your match
-Both players must agree — mismatches escalate!
-""", inline=False)
+    embed.add_field(name="⚔️ Challenges", value=(
+        "`/challenge @user` - Challenge someone (all marbles on the line)\n"
+        "`/accept` - Accept a pending challenge\n"
+        "`/decline` - Decline a pending challenge\n"
+        "`/cancel` - Cancel your outgoing challenge\n"
+        "`/forfeit` - Forfeit your active match (you lose)"
+    ), inline=False)
 
-    embed.add_field(name="💎 Marbles Income", value="""
-Automatic +1 marble for everyone at midnight EST
-`/bonusmarble` — Emergency marble if you're at 0 (once/day)
-`/beg @user` — Ask another player for 1 marble when broke
-""", inline=False)
+    embed.add_field(name="🏆 Results", value=(
+        "`/winner @user` - Report who won your match\n"
+        "Both players must submit matching votes to confirm"
+    ), inline=False)
 
-    embed.add_field(name="🛡️ Admin (Marble Admin role required)", value="""
-`/give @user amount` — Add marbles to a player
-`/take @user amount` — Remove marbles from a player
-`/setmarbles @user amount` — Set a player's exact count
-`/cancelmatch @user` — Cancel a match with no transfer
-""", inline=False)
+    embed.add_field(name="💎 Marbles Income", value=(
+        "Automatic +1 marble for everyone at midnight EST\n"
+        "`/bonusmarble` - Emergency marble if you're at 0 (once/day)\n"
+        "`/beg @user` - Ask another player for 1 marble when broke"
+    ), inline=False)
 
-    embed.set_footer(text="Marbles match??")
-    await interaction.response.send_message(embed=embed)
+    embed.add_field(name="🛡️ Admin (Marble Admin role required)", value=(
+        "`/give @user amount` - Add marbles to a player\n"
+        "`/take @user amount` - Remove marbles from a player\n"
+        "`/setmarbles @user amount` - Set a player's exact count\n"
+        "`/cancelmatch @user` - Cancel a match with no transfer"
+    ), inline=False)
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ==============================================================
