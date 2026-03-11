@@ -1,0 +1,5 @@
+discord.py
+supabase
+python-dotenv
+pytz
+httpx[http2]
