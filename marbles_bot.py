@@ -315,12 +315,17 @@ class BegView(ui.View):
 
 @bot.event
 async def on_ready():
-    await tree.sync()
+    try:
+        await tree.sync()
+        print("Slash commands synced.")
+    except Exception as e:
+        print(f"Failed to sync slash commands: {e} - commands may be stale until next restart.")
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print("Slash commands synced.")
     print("Marbles bot is online!")
-    midnight_marble_drop.start()
-    match_timeout_check.start()
+    if not midnight_marble_drop.is_running():
+        midnight_marble_drop.start()
+    if not match_timeout_check.is_running():
+        match_timeout_check.start()
 
 
 # ==============================================================
