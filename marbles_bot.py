@@ -29,9 +29,9 @@ tree = app_commands.CommandTree(bot)
 EST = pytz.timezone("America/New_York")
 
 # Timeout settings (in minutes)
-NO_VOTE_CANCEL_MINUTES   = 120  # Both players silent for 2 hrs → cancel, no transfer
-ONE_VOTE_WARNING_MINUTES = 60   # One vote in, other silent for 1 hr → warning ping
-ONE_VOTE_AWARD_MINUTES   = 90   # One vote in, other silent for 1.5 hrs → auto-award
+NO_VOTE_CANCEL_MINUTES   = 120
+ONE_VOTE_WARNING_MINUTES = 60
+ONE_VOTE_AWARD_MINUTES   = 90
 
 
 # ==============================================================
@@ -76,7 +76,7 @@ def get_random_quote() -> str:
         if not quotes:
             return ""
         pick = random.choice(quotes)
-        return f'*"{pick["quote"]}"*\n— {pick["author"]}'
+        return f'*"{pick["quote"]}"*\n- {pick["author"]}'
     except FileNotFoundError:
         return ""
 
@@ -89,6 +89,67 @@ def minutes_since(timestamp_str: str) -> float:
         ts = ts.replace(tzinfo=pytz.utc)
     now = datetime.now(pytz.utc)
     return (now - ts).total_seconds() / 60
+
+
+def get_rank_title(p: dict) -> str:
+    """Return a fun rank title based on player stats. Multiple can apply - returns the most notable."""
+    titles = []
+    if (p.get("peak_marbles") or 0) >= 1000:
+        titles.append("🐉 Dragon Hoard")
+    if (p.get("wins") or 0) >= 10:
+        titles.append("🏆 Veteran")
+    if (p.get("current_streak") or 0) >= 3:
+        titles.append("📈 On a Roll")
+    if (p.get("current_streak") or 0) <= -3:
+        titles.append("📉 Not On a Roll")
+    if (p.get("total_matches") or 0) >= 20:
+        titles.append("🎰 Degenerate Gambler")
+    if (p.get("times_gave_beg") or 0) >= 5:
+        titles.append("😇 Saint")
+    if (p.get("times_begged") or 0) >= 10:
+        titles.append("🤲 Charity Case")
+    if (p.get("times_broke") or 0) >= 5:
+        titles.append("🪨 Broke Enthusiast")
+    if (p.get("total_matches") or 0) < 3:
+        titles.append("🐣 Newcomer")
+    return titles[0] if titles else "🔮 Marble Player"
+
+
+def apply_match_result(winner_id: str, loser_id: str, marbles_won: int, marbles_lost: int):
+    """Update all stats for both players after a confirmed match result."""
+    winner = get_player(winner_id)
+    loser = get_player(loser_id)
+
+    new_winner_marbles = winner["marbles"] + loser["marbles"]
+    winner_streak = (winner.get("current_streak") or 0)
+    new_winner_streak = winner_streak + 1 if winner_streak >= 0 else 1
+    new_peak = max(winner.get("peak_marbles") or 0, new_winner_marbles)
+
+    update_player(winner_id, {
+        "marbles": new_winner_marbles,
+        "in_match": False,
+        "wins": (winner.get("wins") or 0) + 1,
+        "total_matches": (winner.get("total_matches") or 0) + 1,
+        "current_streak": new_winner_streak,
+        "best_win": max(winner.get("best_win") or 0, marbles_won),
+        "peak_marbles": new_peak,
+        "marbles_won_gambling": (winner.get("marbles_won_gambling") or 0) + marbles_won,
+    })
+
+    loser_streak = (loser.get("current_streak") or 0)
+    new_loser_streak = loser_streak - 1 if loser_streak <= 0 else -1
+    new_times_broke = (loser.get("times_broke") or 0) + (1 if loser["marbles"] > 0 else 0)
+
+    update_player(loser_id, {
+        "marbles": 0,
+        "in_match": False,
+        "losses": (loser.get("losses") or 0) + 1,
+        "total_matches": (loser.get("total_matches") or 0) + 1,
+        "current_streak": new_loser_streak,
+        "worst_loss": max(loser.get("worst_loss") or 0, marbles_lost),
+        "times_broke": new_times_broke,
+        "marbles_lost_gambling": (loser.get("marbles_lost_gambling") or 0) + marbles_lost,
+    })
 
 
 # ==============================================================
@@ -124,7 +185,7 @@ class ChallengeView(ui.View):
 
         if player["marbles"] == 0:
             await interaction.response.send_message(
-                "You have 0 marbles — you can't accept right now! "
+                "You have 0 marbles - you can't accept right now! "
                 "Use `/bonusmarble` or wait for the midnight drop.",
                 ephemeral=True
             )
@@ -212,12 +273,18 @@ class BegView(ui.View):
             return
         if beggar["marbles"] > 0:
             await interaction.response.send_message(
-                "They already have marbles — no need!", ephemeral=True
+                "They already have marbles - no need!", ephemeral=True
             )
             return
 
-        update_player(str(self.target_id), {"marbles": giver["marbles"] - 1})
-        update_player(str(self.beggar_id), {"marbles": beggar["marbles"] + 1})
+        update_player(str(self.target_id), {
+            "marbles": giver["marbles"] - 1,
+            "times_gave_beg": (giver.get("times_gave_beg") or 0) + 1,
+        })
+        update_player(str(self.beggar_id), {
+            "marbles": beggar["marbles"] + 1,
+            "times_begged": (beggar.get("times_begged") or 0) + 1,
+        })
 
         beggar_user = await bot.fetch_user(self.beggar_id)
         for child in self.children:
@@ -250,7 +317,7 @@ class BegView(ui.View):
 async def on_ready():
     await tree.sync()
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"Slash commands synced.")
+    print("Slash commands synced.")
     print("Marbles bot is online!")
     midnight_marble_drop.start()
     match_timeout_check.start()
@@ -274,6 +341,20 @@ async def join(interaction: discord.Interaction):
         "display_name": interaction.user.display_name,
         "marbles": 10,
         "in_match": False,
+        "wins": 0,
+        "losses": 0,
+        "total_matches": 0,
+        "current_streak": 0,
+        "best_win": 0,
+        "worst_loss": 0,
+        "peak_marbles": 10,
+        "times_broke": 0,
+        "times_used_bonus": 0,
+        "times_begged": 0,
+        "times_gave_beg": 0,
+        "marbles_from_daily": 0,
+        "marbles_won_gambling": 0,
+        "marbles_lost_gambling": 0,
     }).execute()
 
     await interaction.response.send_message(
@@ -313,10 +394,112 @@ async def leaderboard(interaction: discord.Interaction):
             rank = i + 1
         prev_marbles = p["marbles"]
         prefix = medals[rank - 1] if rank <= 3 else f"`{rank}.`"
-        lines.append(f"{prefix} **{p['display_name']}** — {p['marbles']} marble(s)")
+        lines.append(f"{prefix} **{p['display_name']}** - {p['marbles']} marble(s)")
 
     await interaction.response.send_message("🔮 **Marbles Leaderboard**\n" + "\n".join(lines))
 
+
+# ==============================================================
+#  STATS COMMAND
+# ==============================================================
+
+@tree.command(name="stats", description="View a player's stat card.")
+async def stats(interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    target = member or interaction.user
+    p = get_player(str(target.id))
+
+    if not p:
+        await interaction.response.send_message(
+            f"{target.display_name} hasn't joined yet.", ephemeral=True
+        )
+        return
+
+    wins = p.get("wins") or 0
+    losses = p.get("losses") or 0
+    total = p.get("total_matches") or 0
+    win_rate = f"{(wins / total * 100):.1f}%" if total > 0 else "N/A"
+    streak = p.get("current_streak") or 0
+    if streak > 0:
+        streak_str = f"🔥 {streak}W"
+    elif streak < 0:
+        streak_str = f"❄️ {abs(streak)}L"
+    else:
+        streak_str = "None"
+
+    daily = p.get("marbles_from_daily") or 0
+    gambling_won = p.get("marbles_won_gambling") or 0
+    gambling_lost = p.get("marbles_lost_gambling") or 0
+    net_gambling = gambling_won - gambling_lost
+    if daily > 0 and net_gambling != 0:
+        ratio = f"+{net_gambling} from gambling vs +{daily} from dailies"
+    else:
+        ratio = "Not enough data yet"
+
+    rank_title = get_rank_title(p)
+
+    embed = discord.Embed(
+        title=f"{target.display_name}'s Marble Stats",
+        description=f"{rank_title}",
+        color=discord.Color.purple()
+    )
+
+    embed.add_field(
+        name="💰 Current Standing",
+        value=(
+            f"Marbles: **{p['marbles']}**\n"
+            f"Peak ever: **{p.get('peak_marbles') or 0}**"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="⚔️ Match Record",
+        value=(
+            f"W/L: **{wins}/{losses}**\n"
+            f"Win rate: **{win_rate}**\n"
+            f"Total played: **{total}**\n"
+            f"Streak: **{streak_str}**"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📊 Biggest Moments",
+        value=(
+            f"Biggest win: **{p.get('best_win') or 0}** marbles\n"
+            f"Worst loss: **{p.get('worst_loss') or 0}** marbles"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📈 Marble Income",
+        value=(
+            f"From dailies: **{daily}**\n"
+            f"Won gambling: **{gambling_won}**\n"
+            f"Lost gambling: **{gambling_lost}**\n"
+            f"Net gambling: **{'+' if net_gambling >= 0 else ''}{net_gambling}**"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📉 Misfortune",
+        value=(
+            f"Times broke: **{p.get('times_broke') or 0}**\n"
+            f"Bonus marbles used: **{p.get('times_used_bonus') or 0}**\n"
+            f"Times begged: **{p.get('times_begged') or 0}**\n"
+            f"Times gave beg: **{p.get('times_gave_beg') or 0}**"
+        ),
+        inline=True
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+# ==============================================================
+#  HELP COMMAND
+# ==============================================================
 
 @tree.command(name="help", description="Show all available commands.")
 async def help(interaction: discord.Interaction):
@@ -338,7 +521,9 @@ async def help(interaction: discord.Interaction):
         "`/join` - Join the marbles system (starts you at 10)\n"
         "`/marbles` - Check your marble count\n"
         "`/marbles @user` - Check someone else's count\n"
-        "`/leaderboard` - See everyone ranked"
+        "`/leaderboard` - See everyone ranked\n"
+        "`/stats` - View your stat card\n"
+        "`/stats @user` - View someone else's stat card"
     ), inline=False)
 
     embed.add_field(name="⚔️ Challenges", value=(
@@ -376,11 +561,14 @@ async def help(interaction: discord.Interaction):
 
 @tasks.loop(hours=24)
 async def midnight_marble_drop():
-    res = supabase.table("players").select("user_id, marbles").execute()
+    res = supabase.table("players").select("user_id, marbles, marbles_from_daily").execute()
     for p in res.data:
-        update_player(p["user_id"], {"marbles": p["marbles"] + 1})
+        update_player(p["user_id"], {
+            "marbles": p["marbles"] + 1,
+            "marbles_from_daily": (p.get("marbles_from_daily") or 0) + 1,
+        })
     now_est = datetime.now(EST)
-    print(f"[{now_est.strftime('%Y-%m-%d %H:%M')} EST] Midnight marble drop — {len(res.data)} players updated.")
+    print(f"[{now_est.strftime('%Y-%m-%d %H:%M')} EST] Midnight marble drop - {len(res.data)} players updated.")
 
 
 @midnight_marble_drop.before_loop
@@ -405,7 +593,7 @@ async def bonusmarble(interaction: discord.Interaction):
         return
     if player["marbles"] > 0:
         await interaction.response.send_message(
-            f"{interaction.user.mention} You still have **{player['marbles']} marble(s)** — "
+            f"{interaction.user.mention} You still have **{player['marbles']} marble(s)** - "
             f"`/bonusmarble` is only for players at 0!"
         )
         return
@@ -416,9 +604,13 @@ async def bonusmarble(interaction: discord.Interaction):
             f"Hang tight until midnight! 🕛"
         )
         return
-    update_player(uid, {"marbles": 1, "last_bonus_marble": today})
+    update_player(uid, {
+        "marbles": 1,
+        "last_bonus_marble": today,
+        "times_used_bonus": (player.get("times_used_bonus") or 0) + 1,
+    })
     await interaction.response.send_message(
-        f"🆘 {interaction.user.mention} has been thrown a lifeline — **+1 bonus marble!** "
+        f"🆘 {interaction.user.mention} has been thrown a lifeline - **+1 bonus marble!** "
         f"Don't waste it. Marbles match??"
     )
 
@@ -451,44 +643,44 @@ async def match_timeout_check():
         challenger_user = await bot.fetch_user(int(ch["challenger_id"]))
         opponent_user = await bot.fetch_user(int(ch["opponent_id"]))
 
-        # Stage 1: No votes after 2 hours → cancel
+        # Stage 1: No votes after 2 hours - cancel, no transfer
         if vote_count == 0 and elapsed >= NO_VOTE_CANCEL_MINUTES:
             update_player(ch["challenger_id"], {"in_match": False})
             update_player(ch["opponent_id"], {"in_match": False})
             update_challenge(ch["id"], {"status": "cancelled"})
             await channel.send(
-                f"⏰ {challenger_user.mention} {opponent_user.mention} — "
+                f"⏰ {challenger_user.mention} {opponent_user.mention} - "
                 f"Your match was automatically cancelled after {NO_VOTE_CANCEL_MINUTES // 60} hours "
                 f"with no result reported. No marbles transferred. "
                 f"Run `/challenge` again when you're ready!"
             )
 
-        # Stage 2: One vote in, no warning yet, 1 hour elapsed → warn
+        # Stage 2: One vote in, no warning yet, 1 hour elapsed - warn
         elif vote_count == 1 and not ch.get("vote_warning_sent") and elapsed >= ONE_VOTE_WARNING_MINUTES:
             slow_user = opponent_user if has_challenger_vote else challenger_user
             remaining = ONE_VOTE_AWARD_MINUTES - ONE_VOTE_WARNING_MINUTES
             update_challenge(ch["id"], {"vote_warning_sent": True})
             await channel.send(
-                f"⏰ {slow_user.mention} — your match result is waiting on you! "
+                f"⏰ {slow_user.mention} - your match result is waiting on you! "
                 f"Your opponent already submitted their vote. "
                 f"Run `/winner` in the next **{remaining} minutes** "
                 f"or the match will be awarded to your opponent automatically."
             )
 
-        # Stage 3: One vote in, warning sent, 1.5 hours elapsed → auto-award
+        # Stage 3: One vote in, warning sent, 1.5 hours elapsed - auto-award
         elif vote_count == 1 and ch.get("vote_warning_sent") and elapsed >= ONE_VOTE_AWARD_MINUTES:
             winner_id = ch["challenger_id"] if has_challenger_vote else ch["opponent_id"]
             loser_id = ch["opponent_id"] if has_challenger_vote else ch["challenger_id"]
-
             winner_player = get_player(winner_id)
             loser_player = get_player(loser_id)
-            total = winner_player["marbles"] + loser_player["marbles"]
-            update_player(winner_id, {"marbles": total, "in_match": False})
-            update_player(loser_id, {"marbles": 0, "in_match": False})
+            marbles_won = loser_player["marbles"]
+            marbles_lost = loser_player["marbles"]
+            apply_match_result(winner_id, loser_id, marbles_won, marbles_lost)
             update_challenge(ch["id"], {"status": "complete"})
 
             winner_user = await bot.fetch_user(int(winner_id))
             loser_user = await bot.fetch_user(int(loser_id))
+            total = winner_player["marbles"] + loser_player["marbles"]
             await channel.send(
                 f"⏰ Time's up! {loser_user.mention} never reported a result.\n"
                 f"🏆 **{winner_user.display_name}** is awarded the match by default "
@@ -531,7 +723,7 @@ async def beg(interaction: discord.Interaction, target: discord.Member):
         return
     if beggar["marbles"] > 0:
         await interaction.response.send_message(
-            f"{interaction.user.mention} You have **{beggar['marbles']} marble(s)** — "
+            f"{interaction.user.mention} You have **{beggar['marbles']} marble(s)** - "
             f"you're not broke enough to beg!"
         )
         return
@@ -546,7 +738,7 @@ async def beg(interaction: discord.Interaction, target: discord.Member):
     await interaction.response.send_message(
         f"🙏 **{interaction.user.display_name}** is down to 0 marbles and is begging "
         f"**{target.display_name}** for 1 marble...\n"
-        f"({target.display_name} — will you show mercy?)",
+        f"({target.display_name} - will you show mercy?)",
         view=view
     )
 
@@ -555,7 +747,7 @@ async def beg(interaction: discord.Interaction, target: discord.Member):
 #  CHALLENGE COMMANDS
 # ==============================================================
 
-@tree.command(name="challenge", description="Challenge another player — all your marbles on the line.")
+@tree.command(name="challenge", description="Challenge another player - all your marbles on the line.")
 async def challenge(interaction: discord.Interaction, opponent: discord.Member):
     uid = str(interaction.user.id)
     oid = str(opponent.id)
@@ -582,9 +774,9 @@ async def challenge(interaction: discord.Interaction, opponent: discord.Member):
     if challenger["marbles"] == 0:
         await interaction.response.send_message(
             f"{interaction.user.mention} You have **0 marbles!**\n"
-            f"• Use `/bonusmarble` for a free emergency marble (once per day)\n"
-            f"• Use `/beg` to ask {opponent.display_name} for 1 marble\n"
-            f"• Or wait for the midnight marble drop 🕛"
+            f"- Use `/bonusmarble` for a free emergency marble (once per day)\n"
+            f"- Use `/beg` to ask {opponent.display_name} for 1 marble\n"
+            f"- Or wait for the midnight marble drop 🕛"
         )
         return
     if challenger["in_match"]:
@@ -638,7 +830,7 @@ async def accept(interaction: discord.Interaction):
         return
     if player["marbles"] == 0:
         await interaction.response.send_message(
-            f"{interaction.user.mention} You have 0 marbles — you can't accept! "
+            f"{interaction.user.mention} You have 0 marbles - you can't accept! "
             f"Use `/bonusmarble` or wait for midnight."
         )
         return
@@ -718,9 +910,9 @@ async def forfeit(interaction: discord.Interaction):
     loser_id = uid
     winner_player = get_player(winner_id)
     loser_player = get_player(loser_id)
+    marbles_changing = loser_player["marbles"]
     total = winner_player["marbles"] + loser_player["marbles"]
-    update_player(winner_id, {"marbles": total, "in_match": False})
-    update_player(loser_id, {"marbles": 0, "in_match": False})
+    apply_match_result(winner_id, loser_id, marbles_changing, marbles_changing)
     update_challenge(ch["id"], {"status": "complete"})
 
     winner_user = await bot.fetch_user(int(winner_id))
@@ -770,9 +962,9 @@ async def winner(interaction: discord.Interaction, reported_winner: discord.Memb
             loser_id = ch["opponent_id"] if winner_id == ch["challenger_id"] else ch["challenger_id"]
             winner_player = get_player(winner_id)
             loser_player = get_player(loser_id)
+            marbles_changing = loser_player["marbles"]
             total = winner_player["marbles"] + loser_player["marbles"]
-            update_player(winner_id, {"marbles": total, "in_match": False})
-            update_player(loser_id, {"marbles": 0, "in_match": False})
+            apply_match_result(winner_id, loser_id, marbles_changing, marbles_changing)
             update_challenge(ch["id"], {"status": "complete"})
             winner_user = await bot.fetch_user(int(winner_id))
             loser_user = await bot.fetch_user(int(loser_id))
@@ -789,21 +981,31 @@ async def winner(interaction: discord.Interaction, reported_winner: discord.Memb
             })
             if mismatches == 1:
                 await interaction.response.send_message(
-                    f"⚠️ {challenger_user.mention} {opponent_user.mention} — "
+                    f"⚠️ {challenger_user.mention} {opponent_user.mention} - "
                     f"Votes didn't match! Figure it out and both vote again with `/winner`."
                 )
             elif mismatches == 2:
                 await interaction.response.send_message(
-                    f"🚨 {challenger_user.mention} {opponent_user.mention} — "
+                    f"🚨 {challenger_user.mention} {opponent_user.mention} - "
                     f"Votes mismatched again! **Final warning:** next mismatch and "
                     f"**BOTH players lose ALL their marbles.** 🔮"
                 )
             else:
-                update_player(ch["challenger_id"], {"marbles": 0, "in_match": False})
-                update_player(ch["opponent_id"], {"marbles": 0, "in_match": False})
+                winner_p = get_player(ch["challenger_id"])
+                opp_p = get_player(ch["opponent_id"])
+                update_player(ch["challenger_id"], {
+                    "marbles": 0,
+                    "in_match": False,
+                    "times_broke": (winner_p.get("times_broke") or 0) + 1,
+                })
+                update_player(ch["opponent_id"], {
+                    "marbles": 0,
+                    "in_match": False,
+                    "times_broke": (opp_p.get("times_broke") or 0) + 1,
+                })
                 update_challenge(ch["id"], {"status": "complete"})
                 await interaction.response.send_message(
-                    f"💀 {challenger_user.mention} {opponent_user.mention} — "
+                    f"💀 {challenger_user.mention} {opponent_user.mention} - "
                     f"Three mismatched votes. **BOTH players set to 0 marbles.** "
                     f"Learn to agree next time. 🔮"
                 )
