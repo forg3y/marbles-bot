@@ -91,8 +91,8 @@ def minutes_since(timestamp_str: str) -> float:
     return (now - ts).total_seconds() / 60
 
 
-def get_rank_title(p: dict) -> str:
-    """Return a fun rank title based on player stats. Multiple can apply - returns the most notable."""
+def get_rank_titles(p: dict) -> str:
+    """Return all earned rank titles as a joined string."""
     titles = []
     if (p.get("peak_marbles") or 0) >= 1000:
         titles.append("🐉 Dragon Hoard")
@@ -112,7 +112,7 @@ def get_rank_title(p: dict) -> str:
         titles.append("🪨 Broke Enthusiast")
     if (p.get("total_matches") or 0) < 3:
         titles.append("🐣 Newcomer")
-    return titles[0] if titles else "🔮 Marble Player"
+    return "\n".join(titles) if titles else "🔮 Marble Player"
 
 
 def apply_match_result(winner_id: str, loser_id: str, marbles_won: int, marbles_lost: int):
@@ -184,9 +184,12 @@ class ChallengeView(ui.View):
             return
 
         if player["marbles"] == 0:
+            challenger_user = await bot.fetch_user(self.challenger_id)
             await interaction.response.send_message(
-                "You have 0 marbles - you can't accept right now! "
-                "Use `/bonusmarble` or wait for the midnight drop.",
+                f"You have 0 marbles - you can't accept right now!\n"
+                f"- Use `/bonusmarble` for a free emergency marble (once per day)\n"
+                f"- Use `/beg @{challenger_user.display_name}` to ask them for 1 marble (don't abuse it - if they're feeling generous they just might!)\n"
+                f"- Or wait for the midnight marble drop 🕛",
                 ephemeral=True
             )
             return
@@ -326,7 +329,11 @@ async def on_ready():
         midnight_marble_drop.start()
     if not match_timeout_check.is_running():
         match_timeout_check.start()
-
+    status_channel_id = os.getenv("STATUS_CHANNEL_ID")
+    if status_channel_id:
+        channel = bot.get_channel(int(status_channel_id))
+        if channel:
+            await channel.send("🔮 Marbles bot is online! Slash commands may take a moment to appear - try **Ctrl+R** if they don't show up.")
 
 # ==============================================================
 #  PLAYER COMMANDS
@@ -440,7 +447,7 @@ async def stats(interaction: discord.Interaction, member: Optional[discord.Membe
     else:
         ratio = "Not enough data yet"
 
-    rank_title = get_rank_title(p)
+    rank_title = get_rank_titles(p)
 
     embed = discord.Embed(
         title=f"{target.display_name}'s Marble Stats",
@@ -494,7 +501,7 @@ async def stats(interaction: discord.Interaction, member: Optional[discord.Membe
             f"Times broke: **{p.get('times_broke') or 0}**\n"
             f"Bonus marbles used: **{p.get('times_used_bonus') or 0}**\n"
             f"Times begged: **{p.get('times_begged') or 0}**\n"
-            f"Times gave beg: **{p.get('times_gave_beg') or 0}**"
+            f"Times donated: **{p.get('times_gave_beg') or 0}**"
         ),
         inline=True
     )
@@ -834,9 +841,16 @@ async def accept(interaction: discord.Interaction):
         )
         return
     if player["marbles"] == 0:
+        ch_temp = get_active_challenge(uid)
+        challenger_name = ""
+        if ch_temp:
+            c = get_player(ch_temp["challenger_id"])
+            challenger_name = c["display_name"] if c else ""
         await interaction.response.send_message(
-            f"{interaction.user.mention} You have 0 marbles - you can't accept! "
-            f"Use `/bonusmarble` or wait for midnight."
+            f"{interaction.user.mention} You have 0 marbles - you can't accept right now!\n"
+            f"- Use `/bonusmarble` for a free emergency marble (once per day)\n"
+            f"- Use `/beg @{challenger_name}` to ask them for 1 marble (don't abuse it - if they're feeling generous they just might!)\n"
+            f"- Or wait for the midnight marble drop 🕛"
         )
         return
 
@@ -974,8 +988,9 @@ async def winner(interaction: discord.Interaction, reported_winner: discord.Memb
             winner_user = await bot.fetch_user(int(winner_id))
             loser_user = await bot.fetch_user(int(loser_id))
             await interaction.response.send_message(
-                f"🏆 Match confirmed! **{winner_user.display_name}** wins **{total} marble(s)!**\n"
-                f"{loser_user.mention} has been cleaned out. Marbles match??"
+                f"🏆 Match confirmed! {winner_user.mention} wins **{total} marble(s)!**\n"
+                f"{loser_user.mention} has been cleaned out.\n\n"
+                f"{get_random_quote()}"
             )
         else:
             mismatches = ch["vote_mismatches"] + 1
