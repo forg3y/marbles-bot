@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from datetime import datetime, date, timedelta
 import pytz
 import asyncio
+import csv
+import random
 import os
 
 # ---- Load secrets from .env file ----
@@ -62,6 +64,20 @@ def update_challenge(challenge_id: str, data: dict):
 
 def is_marble_admin(ctx):
     return discord.utils.get(ctx.author.roles, name="Marble Admin") is not None
+
+
+def get_random_quote() -> str:
+    """Load a random quote from quotes.csv and return it formatted for Discord."""
+    try:
+        with open("quotes.csv", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f, delimiter="|")
+            quotes = list(reader)
+        if not quotes:
+            return ""
+        pick = random.choice(quotes)
+        return f'*"{pick["quote"]}"*\n— {pick["author"]}'
+    except FileNotFoundError:
+        return ""
 
 
 def minutes_since(timestamp_str: str) -> float:
@@ -136,7 +152,8 @@ class ChallengeView(ui.View):
             f"✅ {interaction.user.mention} accepted the challenge!\n"
             f"**{challenger_user.display_name}** ({challenger['marbles']} 🔮) vs "
             f"**{interaction.user.display_name}** ({player['marbles']} 🔮)\n"
-            f"Go play your match, then both report `!winner @player` when done. **Marbles match??**"
+            f"Go play your match, then both report `!winner @player` when done.\n\n"
+            f"{get_random_quote()}"
         )
         self.stop()
 
@@ -591,7 +608,8 @@ async def accept(ctx):
         f"✅ {ctx.author.mention} accepted the challenge!\n"
         f"**{challenger_user.display_name}** ({challenger['marbles']} 🔮) vs "
         f"**{ctx.author.display_name}** ({player['marbles']} 🔮)\n"
-        f"Go play your match, then both report `!winner @player` when done. **Marbles match??**"
+        f"Go play your match, then both report `!winner @player` when done.\n\n"
+        f"{get_random_quote()}"
     )
 
 
